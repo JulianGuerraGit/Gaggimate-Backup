@@ -13,7 +13,7 @@ import requests
 import websocket
 
 
-TOOL_VERSION = "0.2.0"
+TOOL_VERSION = "0.3.0"
 
 
 class ExportError(RuntimeError):
@@ -37,9 +37,17 @@ def padded_shot_id(shot_id: object) -> str:
     return str(shot_id).strip().zfill(6)
 
 
+def complete_file(path: Path) -> bool:
+    return path.exists() and path.is_file() and path.stat().st_size > 0
+
+
 def write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def read_json(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def copy_file(source: Path, target: Path) -> None:
@@ -79,7 +87,11 @@ def http_json(base_url: str, path: str, timeout: float) -> dict:
     return response.json()
 
 
-def download_history_file(base_url: str, remote_name: str, out_path: Path, timeout: float) -> bool:
+def download_history_file(base_url: str, remote_name: str, out_path: Path, timeout: float, resume: bool) -> str:
+    if resume and complete_file(out_path):
+        print(f"reuse:   history/{remote_name}")
+        return "reused"
+
     url = f"{base_url}/api/history/{remote_name}"
     tmp_path = out_path.with_suffix(out_path.suffix + ".part")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,7 +100,7 @@ def download_history_file(base_url: str, remote_name: str, out_path: Path, timeo
         with requests.get(url, stream=True, timeout=timeout) as response:
             if response.status_code == 404:
                 print(f"missing: history/{remote_name}")
-                return False
+                return "missing"
             response.raise_for_status()
 
             with tmp_path.open("wb") as file:
@@ -98,18 +110,36 @@ def download_history_file(base_url: str, remote_name: str, out_path: Path, timeo
 
         tmp_path.replace(out_path)
         print(f"saved:   history/{remote_name}")
-        return True
+        return "saved"
     except requests.exceptions.Timeout:
         print(f"timeout: history/{remote_name}")
         tmp_path.unlink(missing_ok=True)
-        return False
+        return "missing"
     except Exception as exc:
         print(f"error:   history/{remote_name}: {exc}")
         tmp_path.unlink(missing_ok=True)
-        return False
+        return "missing"
 
 
-def export_settings(base_url: str, backup_dir: Path, timeout: float) -> dict | None:
+def fetch_history_json_file(base_url: str, remote_name: str, timeout: float) -> object | None:
+    url = f"{base_url}/api/history/{remote_name}"
+    try:
+        response = requests.get(url, timeout=timeout)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def export_settings(base_url: str, backup_dir: Path, timeout: float, resume: bool) -> dict | None:
+    settings_path = backup_dir / "settings" / "settings.json"
+    if resume and complete_file(settings_path):
+        print("reuse:   settings/settings.json")
+        data = read_json(settings_path)
+        return data if isinstance(data, dict) else None
+
     print("requesting settings...")
     try:
         settings = http_json(base_url, "/api/settings", timeout)
@@ -122,14 +152,20 @@ def export_settings(base_url: str, backup_dir: Path, timeout: float) -> dict | N
     return settings
 
 
-def export_profiles(base_url: str, backup_dir: Path, sdcard_dir: Path, timeout: float) -> list[dict]:
-    print("requesting profiles...")
-    response = ws_request(base_url, {"tp": "req:profiles:list"}, timeout=timeout)
-    profiles = response.get("profiles", [])
-    if not isinstance(profiles, list):
-        raise ExportError(f"unexpected profiles response: {response}")
+def export_profiles(base_url: str, backup_dir: Path, sdcard_dir: Path, timeout: float, resume: bool) -> list[dict]:
+    profiles_path = backup_dir / "profiles" / "profiles.json"
+    if resume and complete_file(profiles_path):
+        print("reuse:   profiles/profiles.json")
+        profiles = read_json(profiles_path)
+    else:
+        print("requesting profiles...")
+        response = ws_request(base_url, {"tp": "req:profiles:list"}, timeout=timeout)
+        profiles = response.get("profiles", [])
+        write_json(profiles_path, profiles)
 
-    write_json(backup_dir / "profiles" / "profiles.json", profiles)
+    if not isinstance(profiles, list):
+        raise ExportError(f"unexpected profiles data: {profiles}")
+
     print(f"found {len(profiles)} profiles")
 
     for index, profile in enumerate(profiles):
@@ -139,9 +175,12 @@ def export_profiles(base_url: str, backup_dir: Path, sdcard_dir: Path, timeout: 
 
         filename = f"{profile_id}.json"
         backup_path = backup_dir / "profiles" / filename
-        write_json(backup_path, profile)
+        if resume and complete_file(backup_path):
+            print(f"reuse:   profiles/{filename}")
+        else:
+            write_json(backup_path, profile)
+            print(f"saved:   profiles/{filename}")
         copy_file(backup_path, sdcard_dir / "p" / filename)
-        print(f"saved:   profiles/{filename}")
 
     return profiles
 
@@ -153,6 +192,7 @@ def export_history(
     timeout: float,
     skip_notes: bool,
     rebuild_index_first: bool,
+    resume: bool,
 ) -> tuple[list[dict], dict]:
     if rebuild_index_first:
         print("requesting history index rebuild...")
@@ -164,25 +204,34 @@ def export_history(
         except Exception as exc:
             print(f"warning: rebuild request failed: {exc}")
 
-    print("requesting history list...")
-    response = ws_request(base_url, {"tp": "req:history:list"}, timeout=timeout)
-    history = response.get("history", [])
-    if not isinstance(history, list):
-        raise ExportError(f"unexpected history response: {response}")
+    history_path = backup_dir / "history" / "history.json"
+    if resume and complete_file(history_path):
+        print("reuse:   history/history.json")
+        history = read_json(history_path)
+    else:
+        print("requesting history list...")
+        response = ws_request(base_url, {"tp": "req:history:list"}, timeout=timeout)
+        history = response.get("history", [])
+        write_json(history_path, history)
 
-    write_json(backup_dir / "history" / "history.json", history)
+    if not isinstance(history, list):
+        raise ExportError(f"unexpected history data: {history}")
+
     print(f"found {len(history)} shot entries")
 
     stats = {
         "history_files_saved": 0,
+        "history_files_reused": 0,
         "history_files_failed_or_missing": 0,
         "notes_saved": 0,
+        "notes_reused": 0,
         "notes_empty_or_missing": 0,
     }
 
-    if download_history_file(base_url, "index.bin", backup_dir / "history" / "index.bin", timeout):
+    status = download_history_file(base_url, "index.bin", backup_dir / "history" / "index.bin", timeout, resume)
+    if status in {"saved", "reused"}:
         copy_file(backup_dir / "history" / "index.bin", sdcard_dir / "h" / "index.bin")
-        stats["history_files_saved"] += 1
+        stats["history_files_saved" if status == "saved" else "history_files_reused"] += 1
     else:
         stats["history_files_failed_or_missing"] += 1
 
@@ -194,37 +243,68 @@ def export_history(
 
         slog_name = f"{shot_id}.slog"
         slog_path = backup_dir / "history" / slog_name
-        if download_history_file(base_url, slog_name, slog_path, timeout):
+        status = download_history_file(base_url, slog_name, slog_path, timeout, resume)
+        if status in {"saved", "reused"}:
             copy_file(slog_path, sdcard_dir / "h" / slog_name)
-            stats["history_files_saved"] += 1
+            stats["history_files_saved" if status == "saved" else "history_files_reused"] += 1
         else:
             stats["history_files_failed_or_missing"] += 1
 
         if not skip_notes:
-            notes = fetch_notes(base_url, shot_id, timeout)
-            if notes:
-                notes_path = backup_dir / "history" / f"{shot_id}.json"
-                write_json(notes_path, notes)
-                copy_file(notes_path, sdcard_dir / "h" / f"{shot_id}.json")
-                stats["notes_saved"] += 1
-                print(f"saved:   history/{shot_id}.json")
+            notes_status = export_notes(base_url, backup_dir, sdcard_dir, shot_id, timeout, resume)
+            if notes_status in {"saved", "reused"}:
+                stats["notes_saved" if notes_status == "saved" else "notes_reused"] += 1
             else:
                 stats["notes_empty_or_missing"] += 1
 
     return history, stats
 
 
-def fetch_notes(base_url: str, shot_id: str, timeout: float) -> dict | None:
+def export_notes(
+    base_url: str,
+    backup_dir: Path,
+    sdcard_dir: Path,
+    padded_id: str,
+    timeout: float,
+    resume: bool,
+) -> str:
+    note_name = f"{padded_id}.json"
+    note_path = backup_dir / "history" / note_name
+
+    if resume and complete_file(note_path):
+        copy_file(note_path, sdcard_dir / "h" / note_name)
+        print(f"reuse:   history/{note_name}")
+        return "reused"
+
+    notes = fetch_history_json_file(base_url, note_name, timeout)
+    if notes:
+        write_json(note_path, notes)
+        copy_file(note_path, sdcard_dir / "h" / note_name)
+        print(f"saved:   history/{note_name}")
+        return "saved"
+
+    notes = fetch_notes_via_ws(base_url, padded_id, timeout)
+    if notes:
+        write_json(note_path, notes)
+        copy_file(note_path, sdcard_dir / "h" / note_name)
+        print(f"saved:   history/{note_name}")
+        return "saved"
+
+    return "missing"
+
+
+def fetch_notes_via_ws(base_url: str, shot_id: str, timeout: float) -> dict | None:
     try:
-        response = ws_request(
-            base_url,
-            {"tp": "req:history:notes:get", "id": shot_id},
-            timeout=timeout,
-        )
+        response = ws_request(base_url, {"tp": "req:history:notes:get", "id": shot_id}, timeout=timeout)
     except Exception:
         return None
 
     notes = response.get("notes")
+    if isinstance(notes, str):
+        try:
+            notes = json.loads(notes)
+        except ValueError:
+            return None
     if isinstance(notes, dict) and notes:
         return notes
     return None
@@ -289,6 +369,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ask the display to rebuild /h/index.bin before exporting history.",
     )
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse files already present in the output folder and export only missing files.",
+    )
+    parser.add_argument(
         "--zip",
         action="store_true",
         help="Create a .zip archive after exporting.",
@@ -315,6 +400,7 @@ def main() -> int:
         "tool_version": TOOL_VERSION,
         "base_url": base_url,
         "downloaded_at": int(time.time()),
+        "resume": args.resume,
         "backup_dir": "backup",
         "sdcard_dir": "sdcard",
         "sdcard_import": {
@@ -326,11 +412,11 @@ def main() -> int:
 
     try:
         if not args.skip_settings:
-            settings = export_settings(base_url, backup_dir, args.timeout)
+            settings = export_settings(base_url, backup_dir, args.timeout, args.resume)
             manifest["settings_exported"] = settings is not None
 
         if not args.skip_profiles:
-            profiles = export_profiles(base_url, backup_dir, sdcard_dir, args.timeout)
+            profiles = export_profiles(base_url, backup_dir, sdcard_dir, args.timeout, args.resume)
             manifest["profile_count"] = len(profiles)
 
         if not args.skip_history:
@@ -341,6 +427,7 @@ def main() -> int:
                 args.timeout,
                 args.skip_notes,
                 args.rebuild_index_first,
+                args.resume,
             )
             manifest["history_count"] = len(history)
             manifest.update(stats)

@@ -52,6 +52,7 @@ uv run gaggimate-shot-backup HOST [options]
 | `--skip-history` | off | Do not export shot history. This also leaves `sdcard/h/` empty or absent. |
 | `--skip-notes` | off | Skip per-shot note JSON files. The exporter still downloads `index.bin` and `.slog` files. |
 | `--rebuild-index-first` | off | Sends `req:history:rebuild` before downloading history. Use this if the Web UI history list is stale or after manually copying shot files. |
+| `--resume` | off | Continue an interrupted export. Existing non-empty files in the output folder are reused, copied into the SD-card tree if needed, and only missing files are fetched. |
 | `--zip` | off | Create a ZIP archive next to the output directory after export completes. |
 | `-h, --help` | n/a | Print CLI help. |
 
@@ -84,6 +85,8 @@ gaggimate-export/
 
 Settings are exported as the same JSON the Web UI downloads from `/api/settings`. Current firmware stores settings in device preferences, not on the SD card, so `sdcard/` only contains profile and shot-history folders.
 
+Shot notes are exported as padded JSON filenames like `000001.json` when they exist.
+
 ## SD Card Migration
 
 To migrate from internal flash history to an SD card:
@@ -107,6 +110,16 @@ internal-to-sd/sdcard/h -> /h
 
 The `sdcard/h` folder contains `index.bin`, `.slog` files, and note `.json` files. The `sdcard/p` folder contains one JSON file per profile.
 
+## Resuming An Interrupted Export
+
+If Wi-Fi drops or the display disconnects during a large history export, rerun the same command with `--resume` and the same output folder:
+
+```bash
+uv run gaggimate-shot-backup gaggimate.local -o gaggimate-export --resume
+```
+
+Resume mode treats existing non-empty files as complete. It still reads the saved profile/history lists from `backup/` when present, copies reused files into `sdcard/`, and fetches only the missing settings, profile, history, or note files.
+
 ## Examples
 
 ```bash
@@ -118,6 +131,9 @@ uv run gaggimate-shot-backup gaggimate.local --skip-history
 
 # Export profiles/history without shot notes.
 uv run gaggimate-shot-backup gaggimate.local --skip-notes
+
+# Continue a failed export into the same output directory.
+uv run gaggimate-shot-backup gaggimate.local -o gaggimate-export --resume
 
 # Export only SD-card-importable profiles and history, skipping settings.
 uv run gaggimate-shot-backup gaggimate.local --skip-settings
