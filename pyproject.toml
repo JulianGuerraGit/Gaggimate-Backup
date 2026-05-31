@@ -1,0 +1,16 @@
+[project]
+name = "gaggimate-shot-backup"
+version = "0.2.0"
+description = "Export GaggiMate settings, profiles, and shot history from internal flash or SD card."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32.0",
+    "websocket-client>=1.8.0",
+]
+
+[project.scripts]
+gaggimate-shot-backup = "gaggimate_shot_backup.export:main"
+
+[tool.uv]
+package = true
