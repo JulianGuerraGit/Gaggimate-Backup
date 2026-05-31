@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Local export output and sample device backups
+gaggimate-export/
+gaggimate-export.zip
+gaggimate-history/
+gaggimate-history-backup/
+backups/
+Manual Export/
