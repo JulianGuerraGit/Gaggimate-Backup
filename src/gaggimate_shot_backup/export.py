@@ -121,14 +121,6 @@ def download_history_file(base_url: str, remote_name: str, out_path: Path, timeo
         return "missing"
 
 
-def valid_json_file(path: Path) -> bool:
-    try:
-        read_json(path)
-        return True
-    except (OSError, ValueError):
-        return False
-
-
 def export_settings(base_url: str, backup_dir: Path, timeout: float, resume: bool) -> dict | None:
     settings_path = backup_dir / "settings" / "settings.json"
     if resume and complete_file(settings_path):
@@ -277,13 +269,10 @@ def export_notes(
         return "reused"
 
     status = download_history_file(base_url, note_name, note_path, timeout, resume=False)
-    if status == "saved" and valid_json_file(note_path):
+    if status == "saved":
         copy_file(note_path, sdcard_dir / "h" / note_name)
         return "saved"
 
-    if status == "saved":
-        print(f"invalid: history/{note_name}")
-        note_path.unlink(missing_ok=True)
     return "missing"
 
 
