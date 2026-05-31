@@ -2,6 +2,10 @@
 
 Exports GaggiMate display settings, profiles, and shot history for backup or SD-card migration.
 
+## Motivation
+
+I made this for backing up and migrating GaggiMate data, especially when moving from internal flash storage to an SD card. It exports settings, profiles, shot history, shot log files, and shot notes through the Web UI HTTP and WebSocket APIs, then creates both a full backup and an SD-card-ready folder structure. It also supports resumable exports, history index rebuilds, and ZIP packaging so interrupted or large backups are easier to manage.
+
 The exporter pulls whichever storage the display is currently using:
 
 | Display state | Exported source |
