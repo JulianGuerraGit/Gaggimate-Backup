@@ -29,6 +29,32 @@ You can also use an IP address:
 uv run gaggimate-shot-backup http://192.168.1.50 -o gaggimate-export
 ```
 
+## Command Reference
+
+```text
+uv run gaggimate-shot-backup HOST [options]
+```
+
+### Required Argument
+
+| Argument | Description |
+|---|---|
+| `HOST` | Display host or URL. Use `gaggimate.local`, an IP address like `192.168.1.50`, or a full URL like `http://192.168.1.50`. If no scheme is supplied, the tool uses `http://`. |
+
+### Options
+
+| Flag | Default | Description |
+|---|---:|---|
+| `-o, --output PATH` | `gaggimate-export` | Output directory for the export. The tool creates `backup/`, `sdcard/`, and `manifest.json` inside this folder. Existing files with the same names may be overwritten. |
+| `--timeout SECONDS` | `20` | Timeout for each HTTP or WebSocket request. Increase this on slow Wi-Fi, large history exports, or displays that serve `.slog` files slowly. |
+| `--skip-settings` | off | Do not fetch `/api/settings`. Use this when you only need SD-card-importable profile/history files. |
+| `--skip-profiles` | off | Do not export profiles. This also leaves `sdcard/p/` empty or absent. |
+| `--skip-history` | off | Do not export shot history. This also leaves `sdcard/h/` empty or absent. |
+| `--skip-notes` | off | Skip per-shot note JSON files. The exporter still downloads `index.bin` and `.slog` files. |
+| `--rebuild-index-first` | off | Sends `req:history:rebuild` before downloading history. Use this if the Web UI history list is stale or after manually copying shot files. |
+| `--zip` | off | Create a ZIP archive next to the output directory after export completes. |
+| `-h, --help` | n/a | Print CLI help. |
+
 ## Output Layout
 
 ```text
@@ -58,7 +84,30 @@ gaggimate-export/
 
 Settings are exported as the same JSON the Web UI downloads from `/api/settings`. Current firmware stores settings in device preferences, not on the SD card, so `sdcard/` only contains profile and shot-history folders.
 
-## Useful Options
+## SD Card Migration
+
+To migrate from internal flash history to an SD card:
+
+1. Remove the SD card from the display, or leave it out if you have not installed one yet.
+2. Start the display and make sure the Web UI is reachable.
+3. Run:
+
+```bash
+uv run gaggimate-shot-backup gaggimate.local -o internal-to-sd
+```
+
+4. Copy these generated folders to the root of the SD card:
+
+```text
+internal-to-sd/sdcard/p -> /p
+internal-to-sd/sdcard/h -> /h
+```
+
+5. Insert the SD card and restart the display.
+
+The `sdcard/h` folder contains `index.bin`, `.slog` files, and note `.json` files. The `sdcard/p` folder contains one JSON file per profile.
+
+## Examples
 
 ```bash
 # Rebuild /h/index.bin before downloading history.
@@ -69,7 +118,17 @@ uv run gaggimate-shot-backup gaggimate.local --skip-history
 
 # Export profiles/history without shot notes.
 uv run gaggimate-shot-backup gaggimate.local --skip-notes
+
+# Export only SD-card-importable profiles and history, skipping settings.
+uv run gaggimate-shot-backup gaggimate.local --skip-settings
+
+# Use a longer timeout for unreliable Wi-Fi or large shot files.
+uv run gaggimate-shot-backup gaggimate.local --timeout 60
 ```
+
+## Manifest
+
+Every export writes `manifest.json` at the output root. It records the source URL, export timestamp, tool version, exported counts, saved/missing history-file counts, and short SD-card import instructions.
 
 ## APIs Used
 
