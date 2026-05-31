@@ -37,6 +37,16 @@ def padded_shot_id(shot_id: object) -> str:
     return str(shot_id).strip().zfill(6)
 
 
+def unpadded_shot_id(shot_id: object) -> str:
+    stripped = str(shot_id).strip()
+    return stripped.lstrip("0") or "0"
+
+
+def unique_values(values: list[str]) -> list[str]:
+    seen = set()
+    return [value for value in values if value and not (value in seen or seen.add(value))]
+
+
 def complete_file(path: Path) -> bool:
     return path.exists() and path.is_file() and path.stat().st_size > 0
 
@@ -268,12 +278,34 @@ def export_notes(
         print(f"reuse:   history/{note_name}")
         return "reused"
 
-    status = download_history_file(base_url, note_name, note_path, timeout, resume=False)
-    if status == "saved":
+    notes = fetch_notes_via_ws(base_url, padded_id, timeout)
+    if notes:
+        write_json(note_path, notes)
         copy_file(note_path, sdcard_dir / "h" / note_name)
+        print(f"saved:   history/{note_name}")
         return "saved"
 
+    print(f"missing: history/{note_name}")
     return "missing"
+
+
+def fetch_notes_via_ws(base_url: str, padded_id: str, timeout: float) -> dict | None:
+    for shot_id in unique_values([padded_id, unpadded_shot_id(padded_id)]):
+        try:
+            response = ws_request(base_url, {"tp": "req:history:notes:get", "id": shot_id}, timeout=timeout)
+        except Exception:
+            continue
+
+        notes = response.get("notes")
+        if isinstance(notes, str):
+            try:
+                notes = json.loads(notes)
+            except ValueError:
+                continue
+        if isinstance(notes, dict) and notes:
+            return notes
+
+    return None
 
 
 def create_zip(export_dir: Path) -> Path:
