@@ -235,11 +235,13 @@ def export_history(
     else:
         stats["history_files_failed_or_missing"] += 1
 
+    shot_ids: list[str] = []
     for item in history:
         raw_shot_id = str(item.get("id", "")).strip()
         if not raw_shot_id:
             continue
         shot_id = padded_shot_id(raw_shot_id)
+        shot_ids.append(shot_id)
 
         slog_name = f"{shot_id}.slog"
         slog_path = backup_dir / "history" / slog_name
@@ -250,7 +252,9 @@ def export_history(
         else:
             stats["history_files_failed_or_missing"] += 1
 
-        if not skip_notes:
+    if not skip_notes:
+        print("requesting shot notes...")
+        for shot_id in shot_ids:
             notes_status = export_notes(base_url, backup_dir, sdcard_dir, shot_id, timeout, resume)
             if notes_status in {"saved", "reused"}:
                 stats["notes_saved" if notes_status == "saved" else "notes_reused"] += 1
@@ -290,6 +294,7 @@ def export_notes(
         print(f"saved:   history/{note_name}")
         return "saved"
 
+    print(f"missing: history/{note_name}")
     return "missing"
 
 

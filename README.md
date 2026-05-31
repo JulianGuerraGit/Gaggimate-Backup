@@ -120,6 +120,8 @@ uv run gaggimate-shot-backup gaggimate.local -o gaggimate-export --resume
 
 Resume mode treats existing non-empty files as complete. It still reads the saved profile/history lists from `backup/` when present, copies reused files into `sdcard/`, and fetches only the missing settings, profile, history, or note files.
 
+History export downloads or reuses `index.bin` and all `.slog` files first. After the shot files are complete, it runs a separate note pass for padded note files like `000001.json`, printing `saved`, `reuse`, or `missing` for each note.
+
 ## Examples
 
 ```bash
