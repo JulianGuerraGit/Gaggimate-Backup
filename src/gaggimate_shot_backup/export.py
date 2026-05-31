@@ -121,16 +121,12 @@ def download_history_file(base_url: str, remote_name: str, out_path: Path, timeo
         return "missing"
 
 
-def fetch_history_json_file(base_url: str, remote_name: str, timeout: float) -> object | None:
-    url = f"{base_url}/api/history/{remote_name}"
+def valid_json_file(path: Path) -> bool:
     try:
-        response = requests.get(url, timeout=timeout)
-        if response.status_code == 404:
-            return None
-        response.raise_for_status()
-        return response.json()
-    except (requests.RequestException, ValueError):
-        return None
+        read_json(path)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def export_settings(base_url: str, backup_dir: Path, timeout: float, resume: bool) -> dict | None:
@@ -280,39 +276,15 @@ def export_notes(
         print(f"reuse:   history/{note_name}")
         return "reused"
 
-    notes = fetch_history_json_file(base_url, note_name, timeout)
-    if notes:
-        write_json(note_path, notes)
+    status = download_history_file(base_url, note_name, note_path, timeout, resume=False)
+    if status == "saved" and valid_json_file(note_path):
         copy_file(note_path, sdcard_dir / "h" / note_name)
-        print(f"saved:   history/{note_name}")
         return "saved"
 
-    notes = fetch_notes_via_ws(base_url, padded_id, timeout)
-    if notes:
-        write_json(note_path, notes)
-        copy_file(note_path, sdcard_dir / "h" / note_name)
-        print(f"saved:   history/{note_name}")
-        return "saved"
-
-    print(f"missing: history/{note_name}")
+    if status == "saved":
+        print(f"invalid: history/{note_name}")
+        note_path.unlink(missing_ok=True)
     return "missing"
-
-
-def fetch_notes_via_ws(base_url: str, shot_id: str, timeout: float) -> dict | None:
-    try:
-        response = ws_request(base_url, {"tp": "req:history:notes:get", "id": shot_id}, timeout=timeout)
-    except Exception:
-        return None
-
-    notes = response.get("notes")
-    if isinstance(notes, str):
-        try:
-            notes = json.loads(notes)
-        except ValueError:
-            return None
-    if isinstance(notes, dict) and notes:
-        return notes
-    return None
 
 
 def create_zip(export_dir: Path) -> Path:
